@@ -16,6 +16,7 @@
 
 import copy
 import inspect
+import time
 import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
@@ -2635,9 +2636,17 @@ class GenerationMixin:
                 if this_peer_finished_flag.item() == 0.0:
                     break
 
+            # local rank
+            local_rank = torch.distributed.get_rank()
+
             # prepare model inputs
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
+            if local_rank == 0:
+                print("input_ids.shape:", input_ids.shape)
 
+            torch.cuda.synchronize()
+            if local_rank == 0:
+                start = time.time()
             # forward pass to get next token
             outputs = self(
                 **model_inputs,
@@ -2645,6 +2654,10 @@ class GenerationMixin:
                 output_attentions=output_attentions,
                 output_hidden_states=output_hidden_states,
             )
+            torch.cuda.synchronize()
+            if local_rank == 0:
+                end = time.time()
+                print("time:", end - start)
 
             if synced_gpus and this_peer_finished:
                 continue  # don't waste resources running the code we don't need
