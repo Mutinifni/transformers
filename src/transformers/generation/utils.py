@@ -2646,7 +2646,8 @@ class GenerationMixin:
 
             torch.cuda.synchronize()
             if local_rank == 0:
-                start = time.time()
+                #start = time.time()
+                start = time.monotonic()
             # forward pass to get next token
             outputs = self(
                 **model_inputs,
@@ -2656,8 +2657,9 @@ class GenerationMixin:
             )
             torch.cuda.synchronize()
             if local_rank == 0:
-                end = time.time()
-                print("time:", end - start)
+                #end = time.time()
+                end = time.monotonic()
+                print("time:", end - start, end)
 
             if synced_gpus and this_peer_finished:
                 continue  # don't waste resources running the code we don't need
