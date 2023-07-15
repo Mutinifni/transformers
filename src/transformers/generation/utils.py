@@ -2636,18 +2636,46 @@ class GenerationMixin:
                 if this_peer_finished_flag.item() == 0.0:
                     break
 
-            # local rank
-            local_rank = torch.distributed.get_rank()
-
             # prepare model inputs
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
-            if local_rank == 0:
-                print("input_ids.shape:", input_ids.shape)
 
-            torch.cuda.synchronize()
-            if local_rank == 0:
+            # local rank
+            local_rank = torch.distributed.get_rank()
+            #if local_rank == 0:
+            #    print("input_ids.shape:", input_ids.shape)
+
+            # note: assumes same request sizes each time
+            try:
+                # check if we are starting a new prompt phase
+                if input_ids.shape == self.prompt_input_ids_shape:
+                    self.prompt_phase = True
+                    if self.end_token_phase_input_ids_shape == None:
+                        self.end_token_phase_input_ids_shape = self.previous_input_ids_shape
+                # check if we are ending a token phase
+                elif input_ids.shape == self.end_token_phase_input_ids_shape:
+                    self.end_token_phase = True
+            except:
+                # set the first prompt phase input_ids shape
+                self.prompt_input_ids_shape = input_ids.shape
+                self.end_token_phase_input_ids_shape = None
+
+                # ignore the first inference request for measurement
+                self.prompt_phase = False
+                self.start_token_phase = False
+                self.end_token_phase = False
+
+                # initialize bookkeeping structures
+                self.previous_input_ids_shape = input_ids.shape
+                self.prompt_phase_times = []
+                self.token_phase_times = []
+
+            # start measurement if prompt or token phase is starting
+            if (local_rank == 0) and (self.prompt_phase or self.start_token_phase):
+                torch.cuda.synchronize()
                 #start = time.time()
                 start = time.monotonic()
+                self.start_token_phase = False
+
             # forward pass to get next token
             outputs = self(
                 **model_inputs,
@@ -2655,11 +2683,26 @@ class GenerationMixin:
                 output_attentions=output_attentions,
                 output_hidden_states=output_hidden_states,
             )
-            torch.cuda.synchronize()
-            if local_rank == 0:
+
+            # complete measurement if prompt phase or token phase finishes
+            if (local_rank == 0) and (self.prompt_phase or self.end_token_phase):
+                torch.cuda.synchronize()
                 #end = time.time()
                 end = time.monotonic()
-                print("time:", end - start, end)
+                # if prompt phase finished, start token phase
+                if self.prompt_phase:
+                    self.prompt_phase_times.append(end - start)
+                    self.prompt_phase = False
+                    self.start_token_phase = True
+                # if token phase finished, print timings
+                elif self.end_token_phase:
+                    self.token_phase_times.append(end - start)
+                    self.end_token_phase = False
+                    print("Prompt:", self.prompt_phase_times[-1])
+                    print("Token:", self.token_phase_times[-1])
+
+            if local_rank == 0:
+                self.previous_input_ids_shape = input_ids.shape
 
             if synced_gpus and this_peer_finished:
                 continue  # don't waste resources running the code we don't need
