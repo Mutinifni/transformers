@@ -2659,6 +2659,10 @@ class GenerationMixin:
                 self.prompt_input_ids_shape = input_ids.shape
                 self.end_token_phase_input_ids_shape = None
 
+                # toggle whether to track all token latencies
+                self.track_all_tokens = False
+                self.token_latencies = []
+
                 # ignore the first inference request for measurement
                 self.prompt_phase = False
                 self.start_token_phase = False
@@ -2670,7 +2674,7 @@ class GenerationMixin:
                 self.token_phase_times = []
 
             # start measurement if prompt or token phase is starting
-            if (local_rank == 0) and (self.prompt_phase or self.start_token_phase):
+            if (local_rank == 0) and (self.prompt_phase or self.start_token_phase) or self.track_all_tokens:
                 torch.cuda.synchronize()
                 #start = time.time()
                 start = time.monotonic()
@@ -2685,7 +2689,7 @@ class GenerationMixin:
             )
 
             # complete measurement if prompt phase or token phase finishes
-            if (local_rank == 0) and (self.prompt_phase or self.end_token_phase):
+            if (local_rank == 0) and (self.prompt_phase or self.end_token_phase) or self.track_all_tokens:
                 torch.cuda.synchronize()
                 #end = time.time()
                 end = time.monotonic()
@@ -2700,6 +2704,11 @@ class GenerationMixin:
                     self.end_token_phase = False
                     print("Prompt:", self.prompt_phase_times[-1])
                     print("Token:", self.token_phase_times[-1])
+                    if self.track_all_tokens:
+                        print("Token latencies:", self.token_latencies)
+                        self.token_latencies = []
+                if not self.prompt_phase and self.track_all_tokens:
+                    self.token_latencies.append(end - start)
 
             if local_rank == 0:
                 self.previous_input_ids_shape = input_ids.shape
