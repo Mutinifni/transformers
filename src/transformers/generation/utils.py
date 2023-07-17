@@ -2693,6 +2693,9 @@ class GenerationMixin:
                 torch.cuda.synchronize()
                 #end = time.time()
                 end = time.monotonic()
+                # if we're tracking all tokens, add those to the list
+                if not self.prompt_phase and self.track_all_tokens:
+                    self.token_latencies.append(end - start)
                 # if prompt phase finished, start token phase
                 if self.prompt_phase:
                     self.prompt_phase_times.append(end - start)
@@ -2704,11 +2707,11 @@ class GenerationMixin:
                     self.end_token_phase = False
                     print("Prompt:", self.prompt_phase_times[-1])
                     print("Token:", self.token_phase_times[-1])
-                    if self.track_all_tokens:
+                    # only print all tokens if this isn't the first request
+                    if self.track_all_tokens and len(self.prompt_phase_times) > 1:
                         print("Token latencies:", self.token_latencies)
-                        self.token_latencies = []
-                if not self.prompt_phase and self.track_all_tokens:
-                    self.token_latencies.append(end - start)
+                        print(len(self.token_latencies))
+                    self.token_latencies = []
 
             if local_rank == 0:
                 self.previous_input_ids_shape = input_ids.shape
